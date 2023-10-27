@@ -653,13 +653,17 @@ __kernel void dequantize_mul_mat_vec_q6_K(__global const struct block_q6_K * xx,
     const int im = tid/step;                             // 0 or 1. 0 computes 0..., 1 computes 128...
     const int in = tid - step*im;                        // 0...15 or 0...7
 
-#if K_QUANTS_PER_ITERATION == 1
+\n#if K_QUANTS_PER_ITERATION == 1\n
     const int l0 = K_QUANTS_PER_ITERATION*in;            // 0...15
     const int is = 0;
-#else
+
+\n#else\n
+
     const int l0 = 4 * in;                               // 0, 4, 8, ..., 28
     const int is = in / 4;
-#endif
+
+\n#endif\n
+
     const int ql_offset = 64*im + l0;
     const int qh_offset = 32*im + l0;
     const int s_offset  =  8*im + is;
@@ -676,7 +680,7 @@ __kernel void dequantize_mul_mat_vec_q6_K(__global const struct block_q6_K * xx,
 
         const float d = vload_half(0, &x[i].d);
 
-#if K_QUANTS_PER_ITERATION == 1
+\n#if K_QUANTS_PER_ITERATION == 1\n
         float sum = y[ 0] * s[0] * d * ((int8_t)((ql[ 0] & 0xF) | ((qh[ 0] & 0x03) << 4)) - 32)
                   + y[16] * s[1] * d * ((int8_t)((ql[16] & 0xF) | ((qh[16] & 0x03) << 4)) - 32)
                   + y[32] * s[2] * d * ((int8_t)((ql[32] & 0xF) | ((qh[ 0] & 0x0c) << 2)) - 32)
@@ -686,7 +690,7 @@ __kernel void dequantize_mul_mat_vec_q6_K(__global const struct block_q6_K * xx,
                   + y[96] * s[6] * d * ((int8_t)((ql[32]  >> 4) | ((qh[ 0] & 0xc0) >> 2)) - 32)
                   +y[112] * s[7] * d * ((int8_t)((ql[48]  >> 4) | ((qh[16] & 0xc0) >> 2)) - 32);
         tmp[16 * ix + tid] += sum;
-#else
+\n#else\n
         float sum = 0;
         for (int l = 0; l < 4; ++l) {
             sum += y[l+ 0] * s[0] * d * ((int8_t)((ql[l+ 0] & 0xF) | (((qh[l] >> 0) & 3) << 4)) - 32)
@@ -695,7 +699,7 @@ __kernel void dequantize_mul_mat_vec_q6_K(__global const struct block_q6_K * xx,
                  + y[l+96] * s[6] * d * ((int8_t)((ql[l+32]  >> 4) | (((qh[l] >> 6) & 3) << 4)) - 32);
         }
         tmp[16 * ix + tid] += sum;
-#endif
+\n#endif\n
 
     }
 
@@ -1330,7 +1334,7 @@ void ggml_cl_free_data(const struct ggml_tensor* tensor) {
         return;
     }
 
-    cl_mem mem = (cl_mem)tensor->data;
+    cl_mem mem = (cl_mem)tensor->extra;
     clReleaseMemObject(mem);
 }
 
@@ -1376,7 +1380,7 @@ static void ggml_cl_mul_f32(const ggml_tensor * src0, const ggml_tensor * src1, 
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
     const int64_t ne02 = src0->ne[2];
-    const int64_t ne03 = src0->ne[2];
+    const int64_t ne03 = src0->ne[3];
     const int64_t ne0 = ne00 * ne01 * ne02 * ne03;
     const int64_t ne10 = src1->ne[0];
     const int64_t ne11 = src1->ne[1];
@@ -1389,7 +1393,7 @@ static void ggml_cl_mul_f32(const ggml_tensor * src0, const ggml_tensor * src1, 
     size_t d_size;
 
     cl_mem d_X = ggml_cl_pool_malloc(ne0 * sizeof(float), &x_size); // src0
-    cl_mem d_Y = (cl_mem) src1->data; // src1 is already on device, broadcasted.
+    cl_mem d_Y = (cl_mem) src1->extra; // src1 is already on device, broadcasted.
     cl_mem d_D = ggml_cl_pool_malloc(ne0 * sizeof(float), &d_size); // dst
 
 
@@ -1487,9 +1491,9 @@ static void ggml_cl_mul_mat_f32(const ggml_tensor * src0, const ggml_tensor * sr
     size_t d_size;
     cl_mem d_X;
     if (src0->backend == GGML_BACKEND_GPU) { // NOLINT
-        d_X = (cl_mem) src0->data;
+        d_X = (cl_mem) src0->extra;
     } else {
-        d_X = ggml_cl_pool_malloc(sizeof(ggml_fp16_t) * x_ne, &x_size);
+        d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne, &x_size);
     }
     cl_mem d_Y = ggml_cl_pool_malloc(sizeof(float) * y_ne, &y_size);
     cl_mem d_D = ggml_cl_pool_malloc(sizeof(float) * d_ne, &d_size);
@@ -1563,7 +1567,7 @@ static void ggml_cl_mul_mat_f16(const ggml_tensor * src0, const ggml_tensor * sr
     size_t d_size;
     cl_mem d_X;
     if (src0->backend == GGML_BACKEND_GPU) { // NOLINT
-        d_X = (cl_mem) src0->data;
+        d_X = (cl_mem) src0->extra;
     } else {
         d_X = ggml_cl_pool_malloc(sizeof(ggml_fp16_t) * x_ne, &x_size);
     }
@@ -1693,7 +1697,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                 events.emplace_back();
                 CL_CHECK(ggml_cl_h2d_tensor_2d(queue, d_Q, 0, src0, i03, i02, events.data() + ev_idx++));
             } else if (src0->backend == GGML_BACKEND_GPU) {
-                d_Q = (cl_mem) src0->data;
+                d_Q = (cl_mem) src0->extra;
             } else {
                 GGML_ASSERT(false);
             }
@@ -1856,6 +1860,6 @@ void ggml_cl_transform_tensor(void * data, ggml_tensor * tensor) {
 
     CL_CHECK(clFinish(queue));
 
-    tensor->data = dst;
+    tensor->extra = dst;
     GGML_ASSERT(tensor->backend == GGML_BACKEND_GPU);
 }

@@ -81,6 +81,10 @@ func (context *context) SetSpeedup(v bool) {
 	context.params.SetSpeedup(v)
 }
 
+func (context *context) SetSplitOnWord(v bool) {
+	context.params.SetSplitOnWord(v)
+}
+
 // Set number of threads to use
 func (context *context) SetThreads(v uint) {
 	context.params.SetThreads(int(v))
@@ -119,6 +123,11 @@ func (context *context) SetTokenTimestamps(b bool) {
 // Set max tokens per segment (0 = no limit)
 func (context *context) SetMaxTokensPerSegment(n uint) {
 	context.params.SetMaxTokensPerSegment(int(n))
+}
+
+// Set audio encoder context
+func (context *context) SetAudioCtx(n uint) {
+	context.params.SetAudioCtx(int(n))
 }
 
 // ResetTimings resets the mode timings. Should be called before processing

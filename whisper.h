@@ -67,6 +67,7 @@ extern "C" {
 
     struct whisper_context;
     struct whisper_state;
+    struct whisper_full_params;
 
     typedef int whisper_token;
 
@@ -335,6 +336,11 @@ extern "C" {
     // If it returns false, the computation is aborted
     typedef bool (*whisper_encoder_begin_callback)(struct whisper_context * ctx, struct whisper_state * state, void * user_data);
 
+    // Abort callback
+    // If not NULL, called before ggml computation
+    // If it returns true, the computation is aborted
+    typedef bool (*whisper_abort_callback)(void * user_data);
+
     // Logits filter callback
     // Can be used to modify the logits before sampling
     // If not NULL, called after applying temperature to logits
@@ -347,7 +353,7 @@ extern "C" {
                               void * user_data);
 
     // Parameters for the whisper_full() function
-    // If you chnage the order or add new parameters, make sure to update the default values in whisper.cpp:
+    // If you change the order or add new parameters, make sure to update the default values in whisper.cpp:
     // whisper_full_default_params()
     struct whisper_full_params {
         enum whisper_sampling_strategy strategy;
@@ -376,6 +382,7 @@ extern "C" {
         // [EXPERIMENTAL] speed-up techniques
         // note: these can significantly reduce the quality of the output
         bool speed_up;          // speed-up the audio by 2x using Phase Vocoder
+        bool debug_mode;        // enable debug_mode provides extra info (eg. Dump log_mel)
         int  audio_ctx;         // overwrite the audio context size (0 = use default)
 
         // [EXPERIMENTAL] [TDRZ] tinydiarize
@@ -427,6 +434,10 @@ extern "C" {
         // called each time before the encoder starts
         whisper_encoder_begin_callback encoder_begin_callback;
         void * encoder_begin_callback_user_data;
+
+        // called each time before ggml computation starts
+        whisper_abort_callback abort_callback;
+        void * abort_callback_user_data;
 
         // called by each decoder to filter obtained logits
         whisper_logits_filter_callback logits_filter_callback;
@@ -485,6 +496,7 @@ extern "C" {
 
     // Get whether the next segment is predicted as a speaker turn
     WHISPER_API bool whisper_full_get_segment_speaker_turn_next(struct whisper_context * ctx, int i_segment);
+    WHISPER_API bool whisper_full_get_segment_speaker_turn_next_from_state(struct whisper_state * state, int i_segment);
 
     // Get the text of the specified segment
     WHISPER_API const char * whisper_full_get_segment_text           (struct whisper_context * ctx, int i_segment);
@@ -518,6 +530,11 @@ extern "C" {
     WHISPER_API const char * whisper_bench_memcpy_str      (int n_threads);
     WHISPER_API int          whisper_bench_ggml_mul_mat    (int n_threads);
     WHISPER_API const char * whisper_bench_ggml_mul_mat_str(int n_threads);
+
+    // Control logging output; default behavior is to print to stderr
+
+    typedef void (*whisper_log_callback)(const char * line);
+    WHISPER_API void whisper_set_log_callback(whisper_log_callback callback);
 
 #ifdef __cplusplus
 }
