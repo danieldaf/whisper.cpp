@@ -3131,6 +3131,12 @@ const char * whisper_lang_str(int id) {
     return nullptr;
 }
 
+const void whisper_print_langs() {
+    for (const auto & kv : g_lang) {
+        fprintf(stdout, "%s\n", kv.first.c_str());
+    }
+}
+
 int whisper_lang_auto_detect_with_state(
         struct whisper_context * ctx,
           struct whisper_state * state,

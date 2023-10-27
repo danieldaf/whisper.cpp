@@ -92,6 +92,8 @@ struct whisper_params {
     std::string prompt;
     std::string font_path = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf";
     std::string model     = "models/ggml-base.en.bin";
+    
+    int out_lang_id = -1;
 
     // [TDRZ] speaker turn string
     std::string tdrz_speaker_turn = " [SPEAKER_TURN]"; // TODO: set from command line
@@ -325,16 +327,24 @@ void whisper_print_segment_callback(struct whisper_context * ctx, struct whisper
     }
 }
 
-bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
-    std::ofstream fout(fname);
-    if (!fout.is_open()) {
-        fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
-        return false;
-    }
+bool output_stdout_simple(struct whisper_context * ctx, whisper_params & params) {
+  const int n_segments = whisper_full_n_segments(ctx);
+  fprintf(stdout, ">RESULT BEGIN\n");
+  for (int i = 0; i < n_segments; ++i) {
+    const char * text = whisper_full_get_segment_text(ctx, i);
+    //const int langId = ctx->state->lang_id;
+    //params.language = whisper_lang_str(ctx->state->lang_id);
+    params.out_lang_id = whisper_full_lang_id(ctx);
+    //params.out_lang_id = ctx->state->lang_id;
+    fprintf(stdout, "%s\n", text);
+  }
+  fprintf(stdout, ">RESULT END\n");
+  return true;
+}
 
-    fprintf(stderr, "%s: saving output to '%s'\n", __func__, fname);
-
+bool output_stdout(struct whisper_context * ctx, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
     const int n_segments = whisper_full_n_segments(ctx);
+    fprintf(stdout, ">RESULT BEGIN\n");
     for (int i = 0; i < n_segments; ++i) {
         const char * text = whisper_full_get_segment_text(ctx, i);
         std::string speaker = "";
@@ -346,9 +356,38 @@ bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_
             speaker = estimate_diarization_speaker(pcmf32s, t0, t1);
         }
 
+        //stdout << speaker << text << "\n";
+      //fprintf(stdout, "%s  %s\n", speaker, text);
+      fprintf(stdout, "%s\n", text);
+    }
+    fprintf(stdout, ">RESULT END\n");
+    return true;
+}
+
+bool output_txt(struct whisper_context * ctx, const char * fname, const whisper_params & params, std::vector<std::vector<float>> pcmf32s) {
+    std::ofstream fout(fname);
+    if (!fout.is_open()) {
+        fprintf(stderr, "%s: failed to open '%s' for writing\n", __func__, fname);
+        return false;
+    }
+    
+    fprintf(stderr, "%s: saving output to '%s'\n", __func__, fname);
+    
+    const int n_segments = whisper_full_n_segments(ctx);
+    for (int i = 0; i < n_segments; ++i) {
+        const char * text = whisper_full_get_segment_text(ctx, i);
+        std::string speaker = "";
+        
+        if (params.diarize && pcmf32s.size() == 2)
+        {
+            const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
+            const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
+            speaker = estimate_diarization_speaker(pcmf32s, t0, t1);
+        }
+        
         fout << speaker << text << "\n";
     }
-
+    
     return true;
 }
 
@@ -781,7 +820,7 @@ bool output_lrc(struct whisper_context * ctx, const char * fname, const whisper_
     return true;
 }
 
-int main(int argc, char ** argv) {
+int main2(int argc, char ** argv) {
     whisper_params params;
 
     if (whisper_params_parse(argc, argv, params) == false) {
@@ -981,5 +1020,242 @@ int main(int argc, char ** argv) {
     whisper_print_timings(ctx);
     whisper_free(ctx);
 
+    return 0;
+}
+
+int doProcess(whisper_context *ctx, whisper_params& params, char *fileIn) {
+    //params.fname_inp.clear();
+    //params.fname_inp.push_back(fileIn);
+    const std::string fname_inp(fileIn);
+    
+    std::vector<float> pcmf32;               // mono-channel F32 PCM
+    std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
+    
+    if (!::read_wav(fname_inp, pcmf32, pcmf32s, params.diarize)) {
+        fprintf(stderr, "error: failed to read WAV file '%s'\n", fname_inp.c_str());
+        return -1;
+    }
+    
+    // print system information
+//    {
+//        fprintf(stderr, "\n");
+//        fprintf(stderr, "system_info: n_threads = %d / %d | %s\n",
+//                params.n_threads*params.n_processors, std::thread::hardware_concurrency(), whisper_print_system_info());
+//    }
+    
+    // print some info about the processing
+//    {
+//        fprintf(stderr, "\n");
+//        if (!whisper_is_multilingual(ctx)) {
+//            if (params.language != "en" || params.translate) {
+//                params.language = "en";
+//                params.translate = false;
+//                fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
+//            }
+//        }
+//        if (params.detect_language) {
+//            params.language = "auto";
+//        }
+//        fprintf(stderr, "%s: processing '%s' (%d samples, %.1f sec), %d threads, %d processors, lang = %s, task = %s, %stimestamps = %d ...\n",
+//                __func__, fname_inp.c_str(), int(pcmf32.size()), float(pcmf32.size())/WHISPER_SAMPLE_RATE,
+//                params.n_threads, params.n_processors,
+//                params.language.c_str(),
+//                params.translate ? "translate" : "transcribe",
+//                params.tinydiarize ? "tdrz = 1, " : "",
+//                params.no_timestamps ? 0 : 1);
+//
+//        fprintf(stderr, "\n");
+//    }
+    
+    // run the inference
+    {
+        whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        
+        wparams.strategy = params.beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+        
+        wparams.print_realtime   = false;
+        wparams.print_progress   = params.print_progress;
+        wparams.print_timestamps = !params.no_timestamps;
+        wparams.print_special    = params.print_special;
+        wparams.translate        = params.translate;
+        wparams.language         = params.language.c_str();
+        wparams.detect_language  = params.detect_language;
+        wparams.n_threads        = params.n_threads;
+        wparams.n_max_text_ctx   = params.max_context >= 0 ? params.max_context : wparams.n_max_text_ctx;
+        wparams.offset_ms        = params.offset_t_ms;
+        wparams.duration_ms      = params.duration_ms;
+        
+        wparams.token_timestamps = params.output_wts || params.max_len > 0;
+        wparams.thold_pt         = params.word_thold;
+        wparams.max_len          = params.output_wts && params.max_len == 0 ? 60 : params.max_len;
+        wparams.split_on_word    = params.split_on_word;
+        
+        wparams.speed_up         = params.speed_up;
+        
+        wparams.tdrz_enable      = params.tinydiarize; // [TDRZ]
+        
+        wparams.initial_prompt   = params.prompt.c_str();
+        
+        wparams.greedy.best_of        = params.best_of;
+        wparams.beam_search.beam_size = params.beam_size;
+        
+        wparams.temperature_inc  = params.no_fallback ? 0.0f : wparams.temperature_inc;
+        wparams.entropy_thold    = params.entropy_thold;
+        wparams.logprob_thold    = params.logprob_thold;
+        
+        whisper_print_user_data user_data = { &params, &pcmf32s };
+        
+        // this callback is called on each new segment
+        if (!wparams.print_realtime) {
+            wparams.new_segment_callback           = whisper_print_segment_callback;
+            wparams.new_segment_callback_user_data = &user_data;
+        }
+        
+        // example for abort mechanism
+        // in this example, we do not abort the processing, but we could if the flag is set to true
+        // the callback is called before every encoder run - if it returns false, the processing is aborted
+        {
+            static bool is_aborted = false; // NOTE: this should be atomic to avoid data race
+
+            wparams.encoder_begin_callback = [](struct whisper_context * /*ctx*/, struct whisper_state * /*state*/, void * user_data) {
+              bool is_aborted = *(bool*)user_data;
+              return !is_aborted;
+            };
+            wparams.encoder_begin_callback_user_data = &is_aborted;
+        }
+        
+        if (whisper_full_parallel(ctx, wparams, pcmf32.data(), pcmf32.size(), params.n_processors) != 0) {
+            fprintf(stderr, "failed to process audio\n");
+            return 10;
+        }
+    }
+
+    //revisar
+    // output stuff
+    {
+        //printf("\n");
+//        std::string fname_out = "/home/daniel/local/proys/personal/ia-opensource-23/whisper/textos/sajid01_wav_es_medium_service_out";
+//        output_stdout(ctx, params, pcmf32s);
+        
+        // output to text file
+//        if (params.output_txt) {
+//            const auto fname_txt = fname_out + ".txt";
+//            output_txt(ctx, fname_txt.c_str(), params, pcmf32s);
+//        }
+        // output to JSON file
+//        if (params.output_jsn) {
+//            const auto fname_jsn = fname_out + ".json";
+//            output_json(ctx, fname_jsn.c_str(), params, pcmf32s);
+//        }
+    }
+    
+    return 0;
+}
+
+void processCommands(whisper_context *ctx, whisper_params &params) {
+    bool finalizar = false;
+    char charsBuffer[1024];
+  
+    fprintf(stdout, ">READY\n");
+    do {
+        charsBuffer[0] = 0x00;
+        char *strRes = fgets(charsBuffer, sizeof(charsBuffer), stdin);
+        if (strRes != nullptr) {
+          char *endLine = strchr(charsBuffer, '\n');
+          if (endLine != nullptr) *endLine = 0x00;
+          
+          size_t strLen = strlen(charsBuffer);
+          
+          if (strncmp(charsBuffer, "LANG ", 5) == 0) {
+            char *lang = &(charsBuffer[5]);
+            if (*lang == 0x00) {
+              fprintf(stdout, ">LANG EMPTY [%s]\n", params.language.c_str());
+            } else {
+              if (strcmp("auto", lang) != 0 && whisper_lang_id(lang) == -1) {
+                fprintf(stdout, ">LANG UNSUPPORTED\n");
+              } else {
+                params.language = std::string(lang);
+                fprintf(stdout, ">LANG OK\n");
+              }
+            }
+            
+          } else if (strncmp(charsBuffer, "FILE ", 5) == 0) {
+            char *fileIn = &(charsBuffer[5]);
+            if (*fileIn == 0x00) {
+              fprintf(stdout, ">FILENAME EMPTY\n");
+            } else {
+              FILE *ftest = fopen(fileIn, "r");
+              if (ftest == nullptr) {
+                fprintf(stdout, ">FILE NOT FOUND\n");
+              } else {
+                fprintf(stdout, ">FILE OK\n");
+                fclose(ftest);
+    
+                fprintf(stdout, ">PROCESSING\n");
+                int res = doProcess(ctx, params, fileIn);
+                if (res == 0) {
+                  output_stdout_simple(ctx, params);
+                  const char *outLang = whisper_lang_str(params.out_lang_id);
+                  if (outLang != nullptr) {
+                    fprintf(stdout, ">LANG %s\n", outLang);
+                  } else {
+                    fprintf(stdout, ">LANG %s\n", params.language.c_str());
+                  }
+                  fprintf(stdout, ">PROCCESS OK\n");
+                } else {
+                  fprintf(stdout, ">PROCCESS ERROR %d\n", res);
+                }
+              }
+            }
+          } else if (strncmp(charsBuffer, "END", 3) == 0 && strLen == 3) {
+            finalizar = true;
+          } else {
+            fprintf(stdout, ">CMD UNKNOW\n");
+          }
+        } else {
+          fprintf(stdout, ">ABORT\n");
+          finalizar = true;
+        }
+    } while(!finalizar);
+    
+    fprintf(stdout, ">FINISHED\n");
+}
+
+//#include <iostream>
+
+int main(int argc, char ** argv) {
+    whisper_params params;
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
+
+    if (whisper_params_parse(argc, argv, params) == false) {
+        whisper_print_usage(argc, argv, params);
+        return 1;
+    }
+
+    if (params.language != "auto" && whisper_lang_id(params.language.c_str()) == -1) {
+        fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
+        exit(-99);
+    }
+    if (params.diarize && params.tinydiarize) {
+        fprintf(stderr, "error: cannot use both --diarize and --tinydiarize\n");
+        exit(-99);
+    }
+    
+    // whisper init
+    struct whisper_context * ctx = whisper_init_from_file(params.model.c_str());
+    if (ctx == nullptr) {
+        fprintf(stderr, "error: failed to initialize whisper context\n");
+        return 3;
+    }
+    
+    // initialize openvino encoder. this has no effect on whisper.cpp builds that don't have OpenVINO configured
+    whisper_ctx_init_openvino_encoder(ctx, nullptr, params.openvino_encode_device.c_str(), nullptr);
+    
+    //wait for commands
+    processCommands(ctx, params);
+    
+    //end
+    whisper_free(ctx);
     return 0;
 }

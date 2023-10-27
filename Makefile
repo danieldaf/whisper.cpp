@@ -1,4 +1,4 @@
-default: main bench quantize
+default: main service bench quantize
 
 ifndef UNAME_S
 UNAME_S := $(shell uname -s)
@@ -172,7 +172,9 @@ ifdef WHISPER_CUBLAS
 	LDFLAGS     += -lcublas -lculibos -lcudart -lcublasLt -lpthread -ldl -lrt -L/usr/local/cuda/lib64 -L/opt/cuda/lib64 -L$(CUDA_PATH)/targets/$(UNAME_M)-linux/lib
 	WHISPER_OBJ += ggml-cuda.o
 	NVCC        = nvcc
-	NVCCFLAGS   = --forward-unknown-to-host-compiler -arch=any
+	NVCCFLAGS   = --forward-unknown-to-host-compiler 
+	#NVCCFLAGS   = --forward-unknown-to-host-compiler -arch=any
+
 
 ggml-cuda.o: ggml-cuda.cu ggml-cuda.h
 	$(NVCC) $(NVCCFLAGS) $(CXXFLAGS) -Wno-pedantic -c $< -o $@
@@ -262,7 +264,7 @@ libwhisper.so: ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) -shared -o libwhisper.so ggml.o $(WHISPER_OBJ) $(LDFLAGS)
 
 clean:
-	rm -f *.o main stream command talk talk-llama bench quantize libwhisper.a libwhisper.so
+	rm -f *.o main service stream command talk talk-llama bench quantize libwhisper.a libwhisper.so
 
 #
 # Examples
@@ -276,6 +278,9 @@ SRC_COMMON_SDL = examples/common-sdl.cpp
 main: examples/main/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/main/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ) -o main $(LDFLAGS)
 	./main -h
+
+service: examples/service/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ)
+	$(CXX) $(CXXFLAGS) examples/service/main.cpp $(SRC_COMMON) ggml.o $(WHISPER_OBJ) -o service $(LDFLAGS)
 
 bench: examples/bench/bench.cpp ggml.o $(WHISPER_OBJ)
 	$(CXX) $(CXXFLAGS) examples/bench/bench.cpp ggml.o $(WHISPER_OBJ) -o bench $(LDFLAGS)
